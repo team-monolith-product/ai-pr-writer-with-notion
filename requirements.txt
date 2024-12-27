@@ -2,5 +2,5 @@ PyGithub
 unidiff
 openai
 notion-client
-dotenv
+python-dotenv
 notion2md
