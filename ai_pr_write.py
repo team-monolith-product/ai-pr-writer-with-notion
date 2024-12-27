@@ -75,13 +75,17 @@ def main():
     )
 
     notion_page = search_page(notion, database_id, property_name, number)
-    if not notion_page:
-        raise ValueError(f"No Notion page found for Task ID: {task_id}")
-    print(f"Fetched Notion Page ID: {notion_page['id']}")
+    if notion_page:
+        print(f"Fetched Notion Page ID: {notion_page['id']}")
+    else :
+        print(f"No Notion page found for Task ID: {task_id}")
 
     # 3) Fetch Notion page content
-    notion_md = StringExporter(
-        block_id=notion_page["id"], output_path="test").export()
+    if notion_page:
+        notion_md = StringExporter(
+            block_id=notion_page["id"], output_path="test").export()
+    else :
+        notion_md = "No Notion page found"
 
     # 4) Get diff from PR
     patch_set = get_patchset_from_git(pr)
