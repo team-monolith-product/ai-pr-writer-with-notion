@@ -330,7 +330,7 @@ def get_chatgpt_pr_body(
         "_L13+ : This line was added in the PR._\n"
         "_L13- : This line was removed in the PR._\n"
         "_L13 : This line was unchanged in the PR._\n"
-        "{patch_text}\n\n"
+        f"{patch_text}\n\n"
         "----\n\n",
         "Please write down a nice PR body from this PR."
     ]
