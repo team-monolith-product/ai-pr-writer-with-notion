@@ -55,6 +55,7 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_API_KEY }}
           SYSTEM_PROMPT: Always answer in Korean.
           LABEL: ai-pr-written
+```
 
 2. **Set Required Secrets**
 
@@ -63,8 +64,6 @@ In your GitHub repository, navigate to Settings > Secrets and variables > Action
 NOTION_TOKEN: Integration key for accessing the Notion API.
 OPENAI_API_KEY: API key for accessing OpenAI.
 
-
-```
 
 ## Advanced Usage
 
