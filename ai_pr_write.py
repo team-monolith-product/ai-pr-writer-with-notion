@@ -90,7 +90,7 @@ def main():
         notion_md = StringExporter(
             block_id=notion_page["id"], output_path="test").export()
     else:
-        notion_md = "No Notion page found"
+        notion_md = None
 
     # 4) Get diff from PR
     patch_set = get_patchset_from_git(pr)
@@ -306,7 +306,7 @@ def get_patch_text_from_patchset(
 
 def get_chatgpt_pr_body(
     patch_text: str,
-    notion_md: str,
+    notion_md: str | None,
     pr: PullRequest,
     system_prompt: str,
 ) -> str:
@@ -323,17 +323,20 @@ def get_chatgpt_pr_body(
     client = OpenAI()
 
     # 1) 프롬프트 생성
-    prompt = (
-        f"# Notion Document:\n{notion_md}\n\n"
-        f"----\n\n"
-        f"# PR Title:\n{pr.title}\n\n"
-        f"----\n\n"
-        f"# PR Body:\n{pr.body}\n\n"
-        f"----\n\n"
-        f"# Patch Diff:\n{patch_text}\n\n"
-        f"----\n\n"
-        f"Please write down a nice PR body from this PR."
-    )
+    prompt_lines = []
+    if notion_md:
+        prompt_lines.append(f"# Notion Document:\n{notion_md}")
+        prompt_lines.append("----\n\n")
+    prompt_lines += [
+        f"# PR Title:\n{pr.title}\n\n",
+        "----\n\n",
+        f"# PR Body:\n{pr.body}\n\n",
+        "----\n\n",
+        f"# Patch Diff:\n{patch_text}\n\n",
+        "----\n\n",
+        "Please write down a nice PR body from this PR."
+    ]
+    prompt = "".join(prompt_lines)
 
     # 2) ChatCompletion 호출
     response = client.chat.completions.create(
