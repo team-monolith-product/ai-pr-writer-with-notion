@@ -49,12 +49,6 @@ def main():
     g = Github(github_token)
     pr = g.get_repo(repo_name).get_pull(pr_number)
 
-    # 0) Check if the label already exists on the PR
-    if any(i.name.lower() == label.lower() for i in pr.get_labels()):
-        print(
-            f"PR #{pr_number} already has the label '{label}'. Skipping PR body generation.")
-        return  # Exit the script as no further action is needed
-
     title = pr.title
 
     # 1) Extract Notion task ID from PR title
