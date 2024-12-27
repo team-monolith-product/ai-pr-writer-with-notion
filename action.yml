@@ -1,0 +1,24 @@
+# action.yml
+name: "AI PR Writer With Notion"
+description: "Use ChatGPT(O1) and Notion to write down a pull request body."
+author: "ChangHwan Lee"
+runs:
+  using: "docker"
+  image: "Dockerfile"
+  
+inputs:
+  GITHUB_TOKEN:
+    description: "GitHub token for API calls."
+    required: true
+  OPENAI_API_KEY:
+    description: "OpenAI API key for ChatGPT(O1)."
+    required: true
+  PR_NUMBER:
+    description: "Pull Request number."
+    required: true
+  NOTION_TOKEN:
+    description: "Notion API Token."
+    required: true
+  SYSTEM_PROMPT:
+    description: "System prompt for ChatGPT(O1)."
+    required: false
