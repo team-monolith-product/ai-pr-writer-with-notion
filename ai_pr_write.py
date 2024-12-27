@@ -80,6 +80,10 @@ def main():
     patch_set = get_patchset_from_git(pr)
     patch_text = get_patch_text_from_patchset(patch_set)
 
+    if pr.body:
+        print(f"PR Body Already Written: {pr.body}")
+        return
+
     # 5) Write PR body
     pr_body = get_chatgpt_pr_body(
         patch_text, notion_md, pr, system_prompt
