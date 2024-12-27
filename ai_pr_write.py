@@ -309,7 +309,7 @@ def get_chatgpt_pr_body(
             },
         ]
     )
-    return json.loads(response.choices[0].message.content)['comments']
+    return response.choices[0].message.content
 
 
 if __name__ == "__main__":
