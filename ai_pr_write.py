@@ -225,6 +225,24 @@ def get_patchset_from_git(
 
     result = subprocess.run(
         [
+            'git',
+            'fetch',
+            'origin',
+            pr.base.ref,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd="/github/workspace"
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Failed to run git fetch. Return code: {result.returncode}\n"
+            f"stderr: {result.stderr}"
+        )
+
+    result = subprocess.run(
+        [
             "git",
             "--no-pager",
             "diff",
