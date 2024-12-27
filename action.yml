@@ -22,3 +22,6 @@ inputs:
   SYSTEM_PROMPT:
     description: "System prompt for ChatGPT(O1)."
     required: false
+  LABEL:
+    description: "Label to be added to the PR. This action will stop immediately if the label is already added."
+    required: false
