@@ -27,6 +27,7 @@ from openai import OpenAI
 
 dotenv.load_dotenv()
 
+
 def main():
     # 0) Load environment variables
     github_token = os.getenv("GITHUB_TOKEN")
@@ -63,28 +64,32 @@ def main():
     # 2) Extract Task ID from PR title
     task_id = extract_dynamic_task_id(
         title, [prefix["prefix"] for prefix in db_name_prefixes])
-    if not task_id:
-        raise ValueError("No valid Notion Task ID found in the PR title.")
-    print(f"Extracted Task ID: {task_id}")
+    if task_id:
+        print(f"Extracted Task ID: {task_id}")
+    else:
+        print("No valid Notion Task ID found in the PR title.")
 
-    prefix = task_id.split("-")[0]
-    number = int(task_id.split("-")[1])
-    database_id, property_name = next(
-        (db_name_prefix["database_id"], db_name_prefix["property_name"])
-        for db_name_prefix in db_name_prefixes if db_name_prefix["prefix"].lower() == prefix.lower()
-    )
+    if task_id:
+        prefix = task_id.split("-")[0]
+        number = int(task_id.split("-")[1])
+        database_id, property_name = next(
+            (db_name_prefix["database_id"], db_name_prefix["property_name"])
+            for db_name_prefix in db_name_prefixes if db_name_prefix["prefix"].lower() == prefix.lower()
+        )
 
-    notion_page = search_page(notion, database_id, property_name, number)
-    if notion_page:
-        print(f"Fetched Notion Page ID: {notion_page['id']}")
-    else :
-        print(f"No Notion page found for Task ID: {task_id}")
+        notion_page = search_page(notion, database_id, property_name, number)
+        if notion_page:
+            print(f"Fetched Notion Page ID: {notion_page['id']}")
+        else:
+            print(f"No Notion page found for Task ID: {task_id}")
+    else:
+        notion_page = None
 
     # 3) Fetch Notion page content
     if notion_page:
         notion_md = StringExporter(
             block_id=notion_page["id"], output_path="test").export()
-    else :
+    else:
         notion_md = "No Notion page found"
 
     # 4) Get diff from PR
