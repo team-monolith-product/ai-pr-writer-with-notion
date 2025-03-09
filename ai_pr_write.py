@@ -1,7 +1,7 @@
 """
 프로젝트: GitHub PR 본문 자동 작성
 
-이 프로그램은 GitHub Pull Reqest 에 대해 본문을 작성합니다.
+이 프로그램은 GitHub Pull Request에 대해 본문을 작성합니다.
 
 다음 두 환경에서 실행됩니다.
 - GitHub Actions: 단일 PR에 대해 실행
@@ -18,6 +18,9 @@ import os
 import re
 import subprocess
 import sys
+import datetime
+import tempfile
+import shutil
 
 import dotenv
 from github import Github
@@ -33,21 +36,6 @@ from openai import OpenAI
 
 dotenv.load_dotenv()
 
-GIT_DIR = "/github/workspace"
-
-# ---------- 상수 정의 (요구사항 6) ----------
-PR_BODY_TEMPLATE = """
-## PR 설명
-
-이 PR은 아래와 같은 변경 사항을 포함합니다:
-
-- 새로운 기능 추가 또는 기존 기능 수정
-- 버그 수정 및 코드 개선
-
-세부 사항은 본문을 참고해 주세요.
-"""
-
-# ---------- 기존 기능을 함수로 분리 ----------
 
 def extract_notion_db_name_prefixes(notion: NotionClient) -> list[dict]:
     """
@@ -132,6 +120,7 @@ def search_page(notion: NotionClient, database_id: str, property_name: str, numb
 
 def get_patchset_from_git(
     pr: PullRequest,
+    git_dir: str,
     context_lines: int = 3
 ) -> PatchSet:
     """
@@ -150,14 +139,7 @@ def get_patchset_from_git(
     # 따라서 safe.directory 설정이 필요합니다.
     # 그렇지 않으면 get diff 에서 not a git repository 에러가 발생합니다.
     result = subprocess.run(
-        [
-            'git',
-            'config',
-            '--global',
-            '--add',
-            'safe.directory',
-            GIT_DIR
-        ],
+        ['git', 'config', '--global', '--add', 'safe.directory', git_dir],
         capture_output=True,
         text=True,
         check=False
@@ -168,17 +150,18 @@ def get_patchset_from_git(
             f"stderr: {result.stderr}"
         )
 
+    print(f"pr.base.sha: {pr.base.sha}")
     result = subprocess.run(
         [
             'git',
             'fetch',
             'origin',
-            pr.base.ref,
+            pr.base.sha,
         ],
         capture_output=True,
         text=True,
         check=False,
-        cwd=GIT_DIR
+        cwd=git_dir
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -192,14 +175,13 @@ def get_patchset_from_git(
             "--no-pager",
             "diff",
             f"--unified={context_lines}",
-            f"origin/{pr.base.ref}",
+            pr.base.sha,
         ],
         capture_output=True,
         text=True,
         check=False,
-        cwd=GIT_DIR
+        cwd=git_dir
     )
-
     if result.returncode != 0:
         raise RuntimeError(
             f"Failed to run git diff. Return code: {result.returncode}\n"
@@ -283,7 +265,7 @@ def get_chatgpt_pr_body(
 
     # 2) ChatCompletion 호출
     response = client.chat.completions.create(
-        model="o3-mini-high",
+        model="o1",
         messages=[
             {
                 "role": "system",
@@ -301,14 +283,15 @@ def get_chatgpt_pr_body(
     return response.choices[0].message.content
 
 
-def generate_pr_body(pr: PullRequest, notion_token: str, system_prompt: str) -> str:
+def generate_pr_body(pr: PullRequest, notion_token: str, system_prompt: str, git_dir: str) -> str:
     """
     PR 본문 생성을 위한 전체 프로세스를 실행합니다.
     """
     # 1) 노션 페이지 내용 가져오기
     notion = NotionClient(auth=notion_token)
     db_prefixes = extract_notion_db_name_prefixes(notion)
-    task_id = extract_dynamic_task_id(pr.title, [p["prefix"] for p in db_prefixes])
+    task_id = extract_dynamic_task_id(
+        pr.title, [p["prefix"] for p in db_prefixes])
     notion_md = None
     if task_id:
         prefix, num_str = task_id.split("-")
@@ -317,10 +300,12 @@ def generate_pr_body(pr: PullRequest, notion_token: str, system_prompt: str) -> 
             if item["prefix"].lower() == prefix.lower():
                 database_id = item["database_id"]
                 property_name = item["property_name"]
-                notion_page = search_page(notion, database_id, property_name, number)
+                notion_page = search_page(
+                    notion, database_id, property_name, number)
                 if notion_page:
                     print(f"Notion 페이지 ID: {notion_page['id']} 조회됨.")
-                    notion_md = StringExporter(block_id=notion_page["id"]).export()
+                    notion_md = StringExporter(
+                        block_id=notion_page["id"]).export()
                 else:
                     print(f"Task ID {task_id}에 해당하는 Notion 페이지를 찾을 수 없습니다.")
                 break
@@ -328,8 +313,9 @@ def generate_pr_body(pr: PullRequest, notion_token: str, system_prompt: str) -> 
         print("PR 제목에서 유효한 Task ID를 찾지 못했습니다.")
 
     # 2) git diff 추출
-    patch_set = get_patchset_from_git(pr)
+    patch_set = get_patchset_from_git(pr, git_dir)
     patch_text = get_patch_text_from_patchset(patch_set)
+    print(patch_text)
 
     # 3) AI로 PR 본문 생성
     ai_pr_body = get_chatgpt_pr_body(patch_text, notion_md, pr, system_prompt)
@@ -349,13 +335,20 @@ def confirm_overwrite(existing_body: str, new_body: str) -> bool:
     return choice == "y"
 
 
-def process_single_pr(pr: PullRequest, notion_token: str, system_prompt: str, label_name: str):
+def process_single_pr(
+    pr: PullRequest,
+    notion_token: str,
+    system_prompt: str,
+    label_name: str,
+    git_dir: str,
+    need_confirm: bool = False
+):
     """
     하나의 PR에 대해 AI 본문 생성 및 덮어쓰기 작업을 수행합니다.
     """
     print(f"\nProcessing PR #{pr.number}: {pr.title}")
-    ai_body = generate_pr_body(pr, notion_token, system_prompt)
-    if confirm_overwrite(pr.body, ai_body):
+    ai_body = generate_pr_body(pr, notion_token, system_prompt, git_dir)
+    if not need_confirm or confirm_overwrite(pr.body, ai_body):
         pr.edit(body=ai_body)
         repo = pr.base.repo
         try:
@@ -385,13 +378,16 @@ def process_single_pr_from_env():
     label_name = os.getenv("LABEL") or "ai-pr-written"
 
     if not github_token or not repo_name or not pr_number_str or not notion_token:
-        raise EnvironmentError("GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, NOTION_TOKEN 환경 변수가 필요합니다.")
+        raise EnvironmentError(
+            "GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, NOTION_TOKEN 환경 변수가 필요합니다.")
 
     pr_number = int(pr_number_str)
     g = Github(github_token)
     repo = g.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
-    process_single_pr(pr, notion_token, system_prompt, label_name)
+    # non-batch 모드에서는 기존 경로 사용
+    git_dir = "/github/workspace"
+    process_single_pr(pr, notion_token, system_prompt, label_name, git_dir)
 
 
 def process_all_prs():
@@ -406,17 +402,77 @@ def process_all_prs():
     label_name = os.getenv("LABEL") or "ai-pr-written"
 
     if not github_token or not repo_name or not notion_token:
-        raise EnvironmentError("GITHUB_TOKEN, GITHUB_REPOSITORY, NOTION_TOKEN 환경 변수가 필요합니다.")
+        raise EnvironmentError(
+            "GITHUB_TOKEN, GITHUB_REPOSITORY, NOTION_TOKEN 환경 변수가 필요합니다.")
 
     g = Github(github_token)
     repo = g.get_repo(repo_name)
-    open_prs = repo.get_pulls(state="all", sort="created")
+
+    open_prs = repo.get_pulls(state="all", sort="created", direction="desc")
     for pr in open_prs:
         # ai-pr-written 라벨이 이미 있으면 건너뜁니다.
         if any(label.name == label_name for label in pr.get_labels()):
             print(f"PR #{pr.number}은 이미 '{label_name}' 라벨이 있으므로 건너뜁니다.")
             continue
-        process_single_pr(pr, notion_token, system_prompt, label_name)
+
+        # 최근 6개월 이내 PR만 대상으로 합니다.
+        created_at = pr.created_at
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if (now - created_at).days > 180:
+            print(f"PR #{pr.number}은 최근 6개월 이내에 업데이트된 PR가 아니므로 건너뜁니다.")
+            continue
+
+        # 해당 PR에 대해 clone을 수행합니다.
+        dest_dir = tempfile.mkdtemp(prefix="git_repo_")
+        print(
+            f"Cloning repository {repo_name} into temporary directory {dest_dir}...")
+
+        repo = pr.base.repo
+        clone_url = repo.clone_url
+        pr_number = pr.number
+        # 1. 레포지토리 clone
+        print(f"Cloning repository {repo.full_name} into {dest_dir}...")
+        result = subprocess.run(
+            ["git", "clone", clone_url, dest_dir],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to clone repository: {result.stderr}")
+
+        # 2. PR의 ref(fetch) – PR 번호에 해당하는 ref를 로컬 브랜치로 생성
+        fetch_command = ["git", "fetch", "origin",
+                         f"pull/{pr_number}/head:pr-{pr_number}"]
+        print(f"Fetching PR branch with command: {' '.join(fetch_command)}")
+        result = subprocess.run(
+            fetch_command,
+            cwd=dest_dir,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to fetch PR branch: {result.stderr}")
+
+        # 3. 생성된 브랜치 체크아웃
+        checkout_command = ["git", "checkout", f"pr-{pr_number}"]
+        print(
+            f"Checking out branch with command: {' '.join(checkout_command)}")
+        result = subprocess.run(
+            checkout_command,
+            cwd=dest_dir,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to checkout branch: {result.stderr}")
+
+        print(f"Successfully cloned and checked out PR #{pr_number} branch.")
+
+        process_single_pr(pr, notion_token, system_prompt,
+                          label_name, dest_dir, True)
+
+        # 작업 완료 후 임시 디렉토리 삭제
+        shutil.rmtree(dest_dir)
 
 
 # ---------- 실행 진입점 ----------
