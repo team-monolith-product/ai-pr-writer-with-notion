@@ -59,13 +59,16 @@ def extract_notion_db_name_prefixes(notion: NotionClient) -> list[dict]:
         }
     )["results"]
 
-    # select a property which type is unique_id
+    # select a property which type is unique_id and has a prefix
     return [
         {
             "prefix": property["unique_id"]["prefix"],
             "database_id": db["id"],
             "property_name": property["name"]
-        } for db in databases for property in db["properties"].values() if property["type"] == "unique_id"
+        }
+        for db in databases
+        for property in db["properties"].values()
+        if property["type"] == "unique_id" and property["unique_id"].get("prefix")
     ]
 
 
@@ -75,14 +78,18 @@ def extract_dynamic_task_id(title: str, prefixes: list[str]) -> str | None:
 
     Args:
         title (str): PR 제목
-        prefixes (str): 데이터베이스 접두사의 리스트
+        prefixes (list[str]): 데이터베이스 접두사의 리스트
 
     Returns:
         추출된 Task ID 또는 None
     """
+    # None 또는 빈 값이 포함될 수 있으므로 필터링한다
+    valid_prefixes = [p for p in prefixes if p]
+    if not valid_prefixes:
+        return None
+
     # 접두사를 포함한 정규식을 동적으로 생성
-    pattern = r"(" + "|".join(re.escape(prefix)
-                              for prefix in prefixes) + r")[\-\s](\d+)"
+    pattern = r"(" + "|".join(re.escape(prefix) for prefix in valid_prefixes) + r")[\-\s](\d+)"
     match = re.search(pattern, title, re.IGNORECASE)
     if match:
         return f"{match.group(1).upper()}-{match.group(2)}"  # 예: TASK-1234
