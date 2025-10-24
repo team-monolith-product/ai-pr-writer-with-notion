@@ -23,7 +23,7 @@ import tempfile
 import shutil
 
 import dotenv
-from github import Github
+from github import Github, Auth
 from github.PullRequest import PullRequest
 from github.GithubException import UnknownObjectException
 
@@ -49,27 +49,40 @@ def extract_notion_db_name_prefixes(notion: NotionClient) -> list[dict]:
         [{
             "prefix": "TASK",
             "database_id": "12345678-1234-1234-1234-1234567890ab",
+            "data_source_id": "12345678-1234-1234-1234-1234567890cd",
             "property_name": "ID"
         }]
     """
-    databases = notion.search(
+    # Search API now returns data_source objects instead of database objects
+    data_sources = notion.search(
         filter={
-            "value": "database",
+            "value": "data_source",
             "property": "object"
         }
     )["results"]
 
     # select a property which type is unique_id and has a prefix
-    return [
-        {
-            "prefix": property["unique_id"]["prefix"],
-            "database_id": db["id"],
-            "property_name": property["name"]
-        }
-        for db in databases
-        for property in db["properties"].values()
-        if property["type"] == "unique_id" and property["unique_id"].get("prefix")
-    ]
+    result = []
+    for data_source in data_sources:
+        # Get the parent database_id from the data_source
+        parent = data_source.get("parent", {})
+        database_id = parent.get("database_id")
+        
+        if not database_id:
+            continue
+            
+        # Check properties for unique_id type
+        properties = data_source.get("properties", {})
+        for property in properties.values():
+            if property["type"] == "unique_id" and property["unique_id"].get("prefix"):
+                result.append({
+                    "prefix": property["unique_id"]["prefix"],
+                    "database_id": database_id,
+                    "data_source_id": data_source["id"],
+                    "property_name": property["name"]
+                })
+    
+    return result
 
 
 def extract_dynamic_task_id(title: str, prefixes: list[str]) -> str | None:
@@ -96,25 +109,30 @@ def extract_dynamic_task_id(title: str, prefixes: list[str]) -> str | None:
     return None
 
 
-def search_page(notion: NotionClient, database_id: str, property_name: str, number: int) -> dict | None:
+def search_page(notion: NotionClient, data_source_id: str, property_name: str, number: int) -> dict | None:
     """
     노션 페이지를 검색해옵니다.
 
     Args:
         notion (NotionClient)
-        database_id (str): 노션 데이터베이스 ID
+        data_source_id (str): 노션 데이터 소스 ID
         property_name (str): Task ID를 저장하는 속성 이름
         number (int): 노션 페이지의 Task ID
 
     Returns:
         노션 페이지의 정보 또는 None
     """
-    response = notion.databases.query(
-        database_id=database_id,
-        filter={
-            "property": property_name,
-            "unique_id": {
-                "equals": number
+    # API version 2025-09-03: databases.query is now data_sources.query
+    # Using request method directly for compatibility with notion-client library
+    response = notion.request(
+        path=f"data_sources/{data_source_id}/query",
+        method="POST",
+        body={
+            "filter": {
+                "property": property_name,
+                "unique_id": {
+                    "equals": number
+                }
             }
         }
     )
@@ -295,7 +313,8 @@ def generate_pr_body(pr: PullRequest, notion_token: str, system_prompt: str, git
     PR 본문 생성을 위한 전체 프로세스를 실행합니다.
     """
     # 1) 노션 페이지 내용 가져오기
-    notion = NotionClient(auth=notion_token)
+    # API version 2025-09-03을 사용하여 data_source 지원
+    notion = NotionClient(auth=notion_token, notion_version="2025-09-03")
     db_prefixes = extract_notion_db_name_prefixes(notion)
     task_id = extract_dynamic_task_id(
         pr.title, [p["prefix"] for p in db_prefixes])
@@ -305,10 +324,10 @@ def generate_pr_body(pr: PullRequest, notion_token: str, system_prompt: str, git
         number = int(num_str)
         for item in db_prefixes:
             if item["prefix"].lower() == prefix.lower():
-                database_id = item["database_id"]
+                data_source_id = item["data_source_id"]
                 property_name = item["property_name"]
                 notion_page = search_page(
-                    notion, database_id, property_name, number)
+                    notion, data_source_id, property_name, number)
                 if notion_page:
                     print(f"Notion 페이지 ID: {notion_page['id']} 조회됨.")
                     notion_md = StringExporter(
@@ -389,7 +408,8 @@ def process_single_pr_from_env():
             "GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, NOTION_TOKEN 환경 변수가 필요합니다.")
 
     pr_number = int(pr_number_str)
-    g = Github(github_token)
+    auth = Auth.Token(github_token)
+    g = Github(auth=auth)
     repo = g.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
     # non-batch 모드에서는 기존 경로 사용
@@ -412,7 +432,8 @@ def process_all_prs():
         raise EnvironmentError(
             "GITHUB_TOKEN, GITHUB_REPOSITORY, NOTION_TOKEN 환경 변수가 필요합니다.")
 
-    g = Github(github_token)
+    auth = Auth.Token(github_token)
+    g = Github(auth=auth)
     repo = g.get_repo(repo_name)
 
     open_prs = repo.get_pulls(state="all", sort="created", direction="desc")
