@@ -23,7 +23,7 @@ import tempfile
 import shutil
 
 import dotenv
-from github import Github
+from github import Github, Auth
 from github.PullRequest import PullRequest
 from github.GithubException import UnknownObjectException
 
@@ -389,7 +389,8 @@ def process_single_pr_from_env():
             "GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, NOTION_TOKEN 환경 변수가 필요합니다.")
 
     pr_number = int(pr_number_str)
-    g = Github(github_token)
+    auth = Auth.Token(github_token)
+    g = Github(auth=auth)
     repo = g.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
     # non-batch 모드에서는 기존 경로 사용
@@ -412,7 +413,8 @@ def process_all_prs():
         raise EnvironmentError(
             "GITHUB_TOKEN, GITHUB_REPOSITORY, NOTION_TOKEN 환경 변수가 필요합니다.")
 
-    g = Github(github_token)
+    auth = Auth.Token(github_token)
+    g = Github(auth=auth)
     repo = g.get_repo(repo_name)
 
     open_prs = repo.get_pulls(state="all", sort="created", direction="desc")
