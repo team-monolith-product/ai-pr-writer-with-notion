@@ -63,39 +63,3 @@ In your GitHub repository, navigate to Settings > Secrets and variables > Action
 
 NOTION_TOKEN: Integration key for accessing the Notion API.
 OPENAI_API_KEY: API key for accessing OpenAI.
-
-
-## Advanced Usage
-
-AI PR Writer is designed to be used in conjunction with [AI Code Reviewer](https://github.com/team-monolith-product/ai-code-reviewer) to provide a comprehensive automated code review and PR documentation experience. Through AI PR Writer, the planning documents created in Notion are indirectly passed to AI Code Reviewer, enabling high-level code reviews that incorporate the planning details. This integration ensures that code reviews are aligned with the project's objectives and requirements, resulting in more effective and context-aware feedback.
-
-To achieve this integration, your AI Code Reviwer workflow should include the following step:
-
-```yaml
-name: AI Code Reviewer
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, review_requested, labeled]
-
-permissions:
-  contents: write
-  pull-requests: write
-
-jobs:
-  ai-code-reviewer:
-    name: ai-code-reviewer
-    runs-on: ubuntu-22.04
-    if: contains(github.event.pull_request.labels.*.name, 'ai-pr-written')
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Run ChatGPT Code Review
-        uses: team-monolith-product/ai-code-reviewer@main
-        with:
-          GITHUB_TOKEN: ${{ secrets.MACHINE_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          PR_NUMBER: ${{ github.event.number }}
-          SYSTEM_PROMPT: Always answer in Korean.
-```
